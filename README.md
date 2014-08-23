@@ -1,5 +1,5 @@
 # Simple HTTP Proxy with NTLM Auth
 
-    $ go run main.go -log
+    $ go run main.go
 
-    $ curl http://google.com -x http://localhost:1080 -U "domain/user:password" --proxy-ntlm
+    $ curl -x localhost:8080 --proxy-ntlm -U domain/user:password http://google.com
