@@ -13,14 +13,13 @@ import (
 )
 
 var (
-  listen   = flag.String("listen", "localhost:1080", "listen on address")
-  user     = flag.String("user", "user", "NTLM user we expect")
-  password = flag.String("password", "password", "NTLM password we expect")
-  domain   = flag.String("domain", "domain", "NTLM domain we expect")
+  listen   = flag.String("listen", "localhost:1080", "listen address")
+  user     = flag.String("user", "user", "NTLM user")
+  password = flag.String("password", "password", "NTLM password")
+  domain   = flag.String("domain", "domain", "NTLM domain")
   logp     = flag.Bool("log", false, "enable logging")
+  enforce  = flag.Bool("enforce", false, "enforce authentication")
 )
-
-var session ntlm.ServerSession
 
 func main() {
   flag.Parse()
@@ -59,8 +58,17 @@ func proxyHandlerFunc(w http.ResponseWriter, r *http.Request) {
   if ntlm_message_type == 1 {
     log.Println("NTLM Negotiate message received")
 
-    session, _ = ntlm.CreateServerSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
+    session, err := ntlm.CreateServerSession(ntlm.Version2, ntlm.ConnectionOrientedMode)
+    if err != nil {
+      log.Println("Error creating server session")
+      log.Println(err)
+      w.Header().Set("Proxy-Authenticate", "NTLM")
+      w.WriteHeader(407)
+      return
+    }
+
     session.SetUserInfo(*user, *password, *domain)
+
     challenge, _ := session.GenerateChallengeMessage()
     proxy_auth_payload := base64.StdEncoding.EncodeToString(challenge.Bytes())
 
@@ -71,15 +79,32 @@ func proxyHandlerFunc(w http.ResponseWriter, r *http.Request) {
     return
   }
 
+  // Handle NTLM challenge response
   if ntlm_message_type == 3 {
     log.Println("NTLM Challenge response received")
 
     authenticate_message, err := ntlm.ParseAuthenticateMessage(raw_proxy_auth_payload, 1)
+    if err != nil {
+      log.Println("Error parsing authenticate message")
+      log.Println(err)
+      w.Header().Set("Proxy-Authenticate", "NTLM")
+      w.WriteHeader(407)
+      return
+    }
 
     // TODO: Figure out why we can't make a real session
-    session, _ = ntlm.CreateServerSession(ntlm.Version1, ntlm.ConnectionOrientedMode)
+    session, err = ntlm.CreateServerSession(ntlm.Version1, ntlm.ConnectionOrientedMode)
+    if err != nil {
+      log.Println("Error creating server session")
+      log.Println(err)
+      w.Header().Set("Proxy-Authenticate", "NTLM")
+      w.WriteHeader(407)
+      return
+    }
+
     err = session.ProcessAuthenticateMessage(authenticate_message)
     if err != nil {
+      log.Println("Error processing authentication message")
       log.Println(err)
       w.Header().Set("Proxy-Authenticate", "NTLM")
       w.WriteHeader(407)
