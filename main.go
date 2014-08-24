@@ -148,24 +148,44 @@ func proxyHandlerFunc(w http.ResponseWriter, r *http.Request) {
     }
   }
 
-  log.Println(r.RemoteAddr, r.Method, r.URL)
+  log.Println(r.RemoteAddr, "Downstream request ", r.Method, r.URL)
 
-  // We'll want to use a new client for every request.
-  client := &http.Client{}
-
-  // Tweak the request as appropriate:
-  //  RequestURI may not be sent to client
-  //  URL.Scheme must be lower-case
+  // Transform request
   r.RequestURI = ""
   r.URL.Scheme = strings.Map(unicode.ToLower, r.URL.Scheme)
+  r.Header.Del("Proxy-Connection")
+  r.Header.Del("Proxy-Authorization")
 
-  // And proxy
+  log.Println(r.RemoteAddr, "Upstream request   ", r.Method, r.URL)
+
+  // Fetch upstream
+  client := &http.Client{}
   resp, err := client.Do(r)
   if err != nil {
     log.Fatal(err)
   }
 
-  log.Println(r.RemoteAddr, resp.Proto, resp.Status)
+  log.Println(r.RemoteAddr, "Upstream response  ", resp.Proto, resp.Status)
 
-  resp.Write(w)
+  hj, ok := w.(http.Hijacker)
+  if !ok {
+    http.Error(w, "webserver doesn't support hijacking", http.StatusInternalServerError)
+    return
+  }
+
+  // Hijack the response writer
+  conn, bufrw, err := hj.Hijack()
+  if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+  }
+
+  // Don't forget to close the connection:
+  defer conn.Close()
+
+  log.Println(r.RemoteAddr, "Downstream response", resp.Proto, resp.Status)
+
+  // Write downstream response
+  resp.Write(bufrw)
+  bufrw.Flush()
 }
